@@ -5,7 +5,7 @@ import com.poc.temporal.lending.domain.enums.InterestAccrualMethod
 import java.math.BigDecimal
 
 /**
- * Input DTO for the LoanLifecycleWorkflow. Must be serialisable by Temporal's Jackson converter.
+ * Input DTO for the LoanLifecycleWorkflow. Must be serializable by Temporal's Jackson converter.
  * Default values provide a no-arg constructor for Jackson deserialization.
  */
 data class LoanWorkflowRequest(

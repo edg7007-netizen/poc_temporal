@@ -90,7 +90,6 @@ class LoanLifecycleWorkflowImpl : LoanLifecycleWorkflow {
         val dailyRate = request.annualInterestRate.divide(
             BigDecimal("365"), 10, RoundingMode.HALF_UP
         )
-        val cycleDurationSeconds = Duration.ofDays(30).seconds
         val oneDaySeconds = Duration.ofDays(1).seconds
 
         for (cycle in 1..request.numberOfPaymentCycles) {
