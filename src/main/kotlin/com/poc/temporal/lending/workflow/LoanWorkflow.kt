@@ -2,21 +2,16 @@ package com.poc.temporal.lending.workflow
 
 import io.temporal.workflow.QueryMethod
 import io.temporal.workflow.SignalMethod
-import io.temporal.workflow.WorkflowInterface
-import io.temporal.workflow.WorkflowMethod
 import java.math.BigDecimal
 
 /**
- * Manages the complete lifecycle of a single loan from disbursement to payoff.
+ * Common signals and queries shared by all loan workflow types.
  *
- * Signals allow external parties (API, manual ops) to interact with the running workflow.
- * Queries expose the current loan state without modifying it.
+ * This interface is intentionally NOT annotated with [@io.temporal.workflow.WorkflowInterface]
+ * so that product-specific workflow interfaces can extend it and evolve independently without
+ * forcing changes across all product types.
  */
-@WorkflowInterface
-interface LoanLifecycleWorkflow {
-
-    @WorkflowMethod
-    fun execute(request: LoanWorkflowRequest)
+interface LoanWorkflow {
 
     /** Signals a payment received from the borrower */
     @SignalMethod

@@ -3,17 +3,18 @@ package com.poc.temporal.lending.service
 import com.poc.temporal.lending.domain.Loan
 import com.poc.temporal.lending.domain.LoanProduct
 import com.poc.temporal.lending.domain.enums.LoanStatus
+import com.poc.temporal.lending.domain.enums.ProductType
 import com.poc.temporal.lending.repository.LoanProductRepository
 import com.poc.temporal.lending.repository.LoanRepository
-import com.poc.temporal.lending.workflow.LoanLifecycleWorkflow
+import com.poc.temporal.lending.workflow.BulletLoanWorkflow
+import com.poc.temporal.lending.workflow.LoanWorkflow
 import com.poc.temporal.lending.workflow.LoanWorkflowRequest
+import com.poc.temporal.lending.workflow.TermLoanWorkflow
 import io.temporal.client.WorkflowClient
-import io.temporal.client.WorkflowExecutionAlreadyStarted
 import io.temporal.client.WorkflowOptions
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 import java.math.BigDecimal
-import java.time.LocalDateTime
 
 @Service
 class LoanService(
@@ -38,18 +39,14 @@ class LoanService(
             )
         )
 
-        // Start the Temporal workflow
         val workflowId = "loan-${loan.id}"
         loan.workflowId = workflowId
         loanRepository.save(loan)
 
-        val workflowStub = workflowClient.newWorkflowStub(
-            LoanLifecycleWorkflow::class.java,
-            WorkflowOptions.newBuilder()
-                .setWorkflowId(workflowId)
-                .setTaskQueue("lending-task-queue")
-                .build()
-        )
+        val options = WorkflowOptions.newBuilder()
+            .setWorkflowId(workflowId)
+            .setTaskQueue("lending-task-queue")
+            .build()
 
         val request = LoanWorkflowRequest(
             loanId = loan.id,
@@ -64,7 +61,7 @@ class LoanService(
             lateFeeRate = product.lateFeeRate
         )
 
-        WorkflowClient.start(workflowStub::execute, request)
+        startWorkflow(product.productType, options, request)
 
         return loan
     }
@@ -77,9 +74,7 @@ class LoanService(
             throw IllegalStateException("Cannot accept payment for loan in status ${loan.status}")
         }
 
-        val workflowId = loan.workflowId ?: throw IllegalStateException("Loan $loanId has no workflow")
-        val stub = workflowClient.newWorkflowStub(LoanLifecycleWorkflow::class.java, workflowId)
-        stub.receivePayment(amount, referenceNumber)
+        workflowStubFor(loan).receivePayment(amount, referenceNumber)
     }
 
     fun cancelLoan(loanId: Long, reason: String) {
@@ -90,23 +85,20 @@ class LoanService(
             throw IllegalStateException("Cannot cancel loan in status ${loan.status}")
         }
 
-        val workflowId = loan.workflowId ?: throw IllegalStateException("Loan $loanId has no workflow")
-        val stub = workflowClient.newWorkflowStub(LoanLifecycleWorkflow::class.java, workflowId)
-        stub.cancelLoan(reason)
+        workflowStubFor(loan).cancelLoan(reason)
     }
 
     fun getLoanStatus(loanId: Long): Map<String, Any> {
         val loan = loanRepository.findById(loanId)
             .orElseThrow { IllegalArgumentException("Loan $loanId not found") }
 
-        val workflowId = loan.workflowId
         var workflowStatus = loan.status.name
         var balance = loan.outstandingBalance
         var cooldown = false
 
-        if (workflowId != null) {
+        if (loan.workflowId != null) {
             try {
-                val stub = workflowClient.newWorkflowStub(LoanLifecycleWorkflow::class.java, workflowId)
+                val stub = workflowStubFor(loan)
                 workflowStatus = stub.getLoanStatus()
                 balance = stub.getOutstandingBalance()
                 cooldown = stub.isInCooldown()
@@ -132,12 +124,41 @@ class LoanService(
     fun getLoansByBorrower(borrowerId: String): List<Loan> =
         loanRepository.findByBorrowerId(borrowerId)
 
+    // ── Private helpers ────────────────────────────────────────────────────────
+
+    /** Starts the correct workflow type for the given product. */
+    private fun startWorkflow(productType: ProductType, options: WorkflowOptions, request: LoanWorkflowRequest) {
+        when (productType) {
+            ProductType.TERM_LOAN -> {
+                val stub = workflowClient.newWorkflowStub(TermLoanWorkflow::class.java, options)
+                WorkflowClient.start(stub::execute, request)
+            }
+            ProductType.BULLET_LOAN -> {
+                val stub = workflowClient.newWorkflowStub(BulletLoanWorkflow::class.java, options)
+                WorkflowClient.start(stub::execute, request)
+            }
+        }
+    }
+
+    /**
+     * Returns a [LoanWorkflow] stub for the running workflow of the given loan,
+     * selecting the correct workflow type from the loan's product.
+     */
+    private fun workflowStubFor(loan: Loan): LoanWorkflow {
+        val workflowId = loan.workflowId ?: throw IllegalStateException("Loan ${loan.id} has no workflow")
+        return when (loan.product.productType) {
+            ProductType.TERM_LOAN ->
+                workflowClient.newWorkflowStub(TermLoanWorkflow::class.java, workflowId)
+            ProductType.BULLET_LOAN ->
+                workflowClient.newWorkflowStub(BulletLoanWorkflow::class.java, workflowId)
+        }
+    }
+
     private fun validateLoanCreation(borrowerId: String, product: LoanProduct, amount: BigDecimal) {
         require(product.active) { "Product ${product.name} is not active" }
         require(amount >= product.minLoanAmount) { "Amount below minimum ${product.minLoanAmount}" }
         require(amount <= product.maxLoanAmount) { "Amount exceeds maximum ${product.maxLoanAmount}" }
 
-        // Check for active or cooldown loans (borrower cannot have two concurrent active loans)
         val activeLoans = loanRepository.findByBorrowerIdAndStatusIn(
             borrowerId,
             listOf(LoanStatus.ACTIVE, LoanStatus.DELINQUENT, LoanStatus.IN_COOLDOWN)
@@ -147,3 +168,4 @@ class LoanService(
         }
     }
 }
+
