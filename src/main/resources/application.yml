@@ -8,10 +8,11 @@ spring:
 
   jpa:
     hibernate:
-      # 'create' drops and recreates the schema on every startup (good for a PoC),
-      # but unlike 'create-drop' it does NOT drop tables on shutdown — so you can
-      # connect to PostgreSQL with psql or a GUI tool at any time and inspect the
-      # data while the app is running or even after it stops.
+      # 'create' drops and recreates the schema on every startup (schema changes are always applied
+      # cleanly, but any data from a previous run is lost on restart — acceptable for this PoC).
+      # Unlike 'create-drop' it does NOT drop tables on shutdown, so you can connect to PostgreSQL
+      # with psql or a GUI tool at any time and inspect the data while the app is running or after
+      # it stops.
       # For a production environment, switch to 'validate' or 'none' and use a migration tool (e.g. Flyway).
       ddl-auto: create
     # Ensures data.sql runs AFTER Hibernate has created the schema

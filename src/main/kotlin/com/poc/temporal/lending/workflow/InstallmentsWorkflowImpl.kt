@@ -15,29 +15,43 @@ import java.time.Duration
  *    15-day grace period. Reinstate ACTIVE status if the borrower pays during grace.
  * 4. When fully paid off: enter the configured cooldown period before completing.
  *
- * All timing is handled by Temporal timers, making this workflow durable and resumable
- * after server restarts without losing state.
+ * Shared state and helpers live in [LoanWorkflowDelegate], composed here rather than
+ * inherited, keeping this class focused purely on Installments-specific lifecycle logic.
  */
 @WorkflowImpl(taskQueues = ["lending-task-queue"])
-class InstallmentsWorkflowImpl : AbstractLoanWorkflow(), InstallmentsWorkflow {
+class InstallmentsWorkflowImpl : InstallmentsWorkflow {
+
+    private val state = LoanWorkflowDelegate()
+
+    // ── Signal and query delegation ────────────────────────────────────────────
+
+    override fun receivePayment(amount: BigDecimal, referenceNumber: String) =
+        state.receivePayment(amount, referenceNumber)
+
+    override fun cancelLoan(reason: String) = state.cancelLoan(reason)
+    override fun getLoanStatus(): String = state.getLoanStatus()
+    override fun getOutstandingBalance(): BigDecimal = state.getOutstandingBalance()
+    override fun isInCooldown(): Boolean = state.isInCooldown()
+
+    // ── Workflow execution ─────────────────────────────────────────────────────
 
     override fun execute(request: LoanWorkflowRequest) {
-        logger.info("Starting Installments workflow for loanId=${request.loanId}")
+        state.logger.info("Starting Installments workflow for loanId=${request.loanId}")
 
         disburseAndActivateLoan(request)
         runMonthlyPaymentCycles(request)
-        finalizeLoan(request)
+        state.finalizeLoan(request)
 
-        logger.info("Installments workflow completed for loanId=${request.loanId}, status=$currentLoanStatus")
+        state.logger.info("Installments workflow completed for loanId=${request.loanId}, status=${state.currentLoanStatus}")
     }
 
     // ── Step 1: Disbursement ───────────────────────────────────────────────────
 
     private fun disburseAndActivateLoan(request: LoanWorkflowRequest) {
-        loanActivities.disburseLoan(request.loanId)
-        ledgerActivities.recordDisbursement(request.loanId, request.principalAmount)
-        balance = request.principalAmount
-        currentLoanStatus = "ACTIVE"
+        state.loanActivities.disburseLoan(request.loanId)
+        state.ledgerActivities.recordDisbursement(request.loanId, request.principalAmount)
+        state.balance = request.principalAmount
+        state.currentLoanStatus = "ACTIVE"
     }
 
     // ── Step 2: Monthly payment cycles ────────────────────────────────────────
@@ -46,7 +60,7 @@ class InstallmentsWorkflowImpl : AbstractLoanWorkflow(), InstallmentsWorkflow {
         val dailyRate = dailyInterestRate(request.annualInterestRate)
 
         for (cycleNumber in 1..request.numberOfPaymentCycles) {
-            if (cancelled || balance <= BigDecimal.ZERO) break
+            if (state.cancelled || state.balance <= BigDecimal.ZERO) break
             processSinglePaymentCycle(cycleNumber, request.numberOfPaymentCycles, request.loanId, dailyRate, request.lateFeeRate)
         }
     }
@@ -58,11 +72,11 @@ class InstallmentsWorkflowImpl : AbstractLoanWorkflow(), InstallmentsWorkflow {
         dailyRate: BigDecimal,
         lateFeeRate: BigDecimal
     ) {
-        logger.info("Starting payment cycle $cycleNumber/$totalCycles for loanId=$loanId")
+        state.logger.info("Starting payment cycle $cycleNumber/$totalCycles for loanId=$loanId")
 
         val paymentReceivedThisCycle = accrueDailyInterestAndWatchForPayment(loanId, dailyRate)
 
-        if (!paymentReceivedThisCycle && !cancelled && balance > BigDecimal.ZERO) {
+        if (!paymentReceivedThisCycle && !state.cancelled && state.balance > BigDecimal.ZERO) {
             handleMissedCyclePayment(cycleNumber, loanId, lateFeeRate)
         }
     }
@@ -74,14 +88,14 @@ class InstallmentsWorkflowImpl : AbstractLoanWorkflow(), InstallmentsWorkflow {
      */
     private fun accrueDailyInterestAndWatchForPayment(loanId: Long, dailyRate: BigDecimal): Boolean {
         for (day in 1..30) {
-            if (cancelled || balance <= BigDecimal.ZERO) break
+            if (state.cancelled || state.balance <= BigDecimal.ZERO) break
 
-            ledgerActivities.recordDailyInterest(loanId, dailyRate)
-            balance = ledgerActivities.getOutstandingBalance(loanId)
+            state.ledgerActivities.recordDailyInterest(loanId, dailyRate)
+            state.balance = state.ledgerActivities.getOutstandingBalance(loanId)
             Workflow.sleep(Duration.ofDays(1))
 
-            if (pendingPaymentAmount != null) {
-                applyPendingPayment(loanId)
+            if (state.pendingPaymentAmount != null) {
+                state.applyPendingPayment(loanId)
                 return true
             }
         }
@@ -91,20 +105,20 @@ class InstallmentsWorkflowImpl : AbstractLoanWorkflow(), InstallmentsWorkflow {
     // ── Step 3: Missed payment handling ───────────────────────────────────────
 
     private fun handleMissedCyclePayment(cycleNumber: Int, loanId: Long, lateFeeRate: BigDecimal) {
-        logger.warn("No payment received for cycle $cycleNumber, loanId=$loanId. Marking delinquent.")
-        loanActivities.markDelinquent(loanId)
-        currentLoanStatus = "DELINQUENT"
+        state.logger.warn("No payment received for cycle $cycleNumber, loanId=$loanId. Marking delinquent.")
+        state.loanActivities.markDelinquent(loanId)
+        state.currentLoanStatus = "DELINQUENT"
 
-        chargeLateFee(loanId, lateFeeRate)
+        state.chargeLateFee(loanId, lateFeeRate)
         reinstateActiveIfPaidDuringGracePeriod(loanId)
     }
 
     private fun reinstateActiveIfPaidDuringGracePeriod(loanId: Long) {
-        val paidDuringGrace = awaitPaymentWithinWindow(loanId, gracePeriod = Duration.ofDays(15))
-        if (paidDuringGrace && currentLoanStatus == "DELINQUENT") {
-            loanActivities.updateLoanStatus(loanId, "ACTIVE")
-            currentLoanStatus = "ACTIVE"
-            logger.info("Loan $loanId reinstated to ACTIVE after grace period payment")
+        val paidDuringGrace = state.awaitPaymentWithinWindow(loanId, gracePeriod = Duration.ofDays(15))
+        if (paidDuringGrace && state.currentLoanStatus == "DELINQUENT") {
+            state.loanActivities.updateLoanStatus(loanId, "ACTIVE")
+            state.currentLoanStatus = "ACTIVE"
+            state.logger.info("Loan $loanId reinstated to ACTIVE after grace period payment")
         }
     }
 

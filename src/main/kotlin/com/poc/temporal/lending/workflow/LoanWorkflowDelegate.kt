@@ -9,44 +9,49 @@ import java.math.BigDecimal
 import java.time.Duration
 
 /**
- * Holds the mutable workflow state and implements the [LoanWorkflow] signals/queries that are
- * identical for every product type. Product-specific execution logic lives in each subclass.
+ * Holds all mutable workflow state, activity stubs, signal/query implementations, and shared
+ * lifecycle helpers that are identical for every product type.
  *
- * Using an abstract class here avoids duplicating signal handlers, query handlers, and shared
- * helpers (payment processing, late fees, cooldown) across every workflow implementation.
+ * Used via **composition** inside each concrete workflow class — [InstallmentsWorkflowImpl] and
+ * [CDDWorkflowImpl] each create one instance and delegate to it, replacing the previous abstract-
+ * class approach with a plain object that has no coupling to any workflow hierarchy.
+ *
+ * Must be instantiated within a Temporal workflow thread (i.e. as a field of the workflow class)
+ * so that [Workflow.newActivityStub] and [Workflow.getLogger] execute in the correct context.
  */
-abstract class AbstractLoanWorkflow : LoanWorkflow {
+class LoanWorkflowDelegate {
 
-    protected val logger = Workflow.getLogger(this::class.java)
+    val logger = Workflow.getLogger(LoanWorkflowDelegate::class.java)
 
     private val activityOptions = ActivityOptions.newBuilder()
         .setStartToCloseTimeout(Duration.ofSeconds(30))
         .setRetryOptions(RetryOptions.newBuilder().setMaximumAttempts(3).build())
         .build()
 
-    protected val loanActivities: LoanActivities =
+    val loanActivities: LoanActivities =
         Workflow.newActivityStub(LoanActivities::class.java, activityOptions)
 
-    protected val ledgerActivities: LedgerActivities =
+    val ledgerActivities: LedgerActivities =
         Workflow.newActivityStub(LedgerActivities::class.java, activityOptions)
 
     // ── Mutable workflow state ─────────────────────────────────────────────────
-    protected var balance: BigDecimal = BigDecimal.ZERO
-    protected var currentLoanStatus: String = "PENDING"
-    protected var cooldownActive: Boolean = false
-    protected var cancelled: Boolean = false
-    protected var cancellationReason: String = ""
-    protected var pendingPaymentAmount: BigDecimal? = null
-    protected var pendingPaymentReference: String = ""
 
-    // ── Signal handlers (shared by all products) ───────────────────────────────
+    var balance: BigDecimal = BigDecimal.ZERO
+    var currentLoanStatus: String = "PENDING"
+    var cooldownActive: Boolean = false
+    var cancelled: Boolean = false
+    var cancellationReason: String = ""
+    var pendingPaymentAmount: BigDecimal? = null
+    var pendingPaymentReference: String = ""
 
-    override fun receivePayment(amount: BigDecimal, referenceNumber: String) {
+    // ── Signal handlers ────────────────────────────────────────────────────────
+
+    fun receivePayment(amount: BigDecimal, referenceNumber: String) {
         pendingPaymentAmount = amount
         pendingPaymentReference = referenceNumber
     }
 
-    override fun cancelLoan(reason: String) {
+    fun cancelLoan(reason: String) {
         if (currentLoanStatus == "PENDING" || currentLoanStatus == "APPROVED") {
             cancelled = true
             cancellationReason = reason
@@ -55,11 +60,11 @@ abstract class AbstractLoanWorkflow : LoanWorkflow {
         }
     }
 
-    // ── Query handlers (shared by all products) ────────────────────────────────
+    // ── Query handlers ─────────────────────────────────────────────────────────
 
-    override fun getLoanStatus(): String = currentLoanStatus
-    override fun getOutstandingBalance(): BigDecimal = balance
-    override fun isInCooldown(): Boolean = cooldownActive
+    fun getLoanStatus(): String = currentLoanStatus
+    fun getOutstandingBalance(): BigDecimal = balance
+    fun isInCooldown(): Boolean = cooldownActive
 
     // ── Shared workflow helpers ────────────────────────────────────────────────
 
@@ -68,7 +73,7 @@ abstract class AbstractLoanWorkflow : LoanWorkflow {
      * Consumes and applies the payment if received.
      * Returns `true` if a payment was processed, `false` if the window elapsed without payment.
      */
-    protected fun awaitPaymentWithinWindow(loanId: Long, gracePeriod: Duration): Boolean {
+    fun awaitPaymentWithinWindow(loanId: Long, gracePeriod: Duration): Boolean {
         Workflow.await(gracePeriod) { pendingPaymentAmount != null || cancelled }
         return if (pendingPaymentAmount != null) {
             applyPendingPayment(loanId)
@@ -81,7 +86,7 @@ abstract class AbstractLoanWorkflow : LoanWorkflow {
     /**
      * Consumes the pending payment signal, posts it to the ledger, and updates the outstanding balance.
      */
-    protected fun applyPendingPayment(loanId: Long) {
+    fun applyPendingPayment(loanId: Long) {
         val amount = pendingPaymentAmount!!
         val reference = pendingPaymentReference
         pendingPaymentAmount = null
@@ -94,7 +99,7 @@ abstract class AbstractLoanWorkflow : LoanWorkflow {
     /**
      * Charges a late fee on the outstanding balance and refreshes [balance].
      */
-    protected fun chargeLateFee(loanId: Long, lateFeeRate: BigDecimal) {
+    fun chargeLateFee(loanId: Long, lateFeeRate: BigDecimal) {
         ledgerActivities.recordLateFee(loanId, balance, lateFeeRate)
         balance = ledgerActivities.getOutstandingBalance(loanId)
     }
@@ -102,7 +107,7 @@ abstract class AbstractLoanWorkflow : LoanWorkflow {
     /**
      * Marks the loan as CANCELLED or triggers the paid-off + cooldown sequence.
      */
-    protected fun finalizeLoan(request: LoanWorkflowRequest) {
+    fun finalizeLoan(request: LoanWorkflowRequest) {
         if (cancelled) {
             loanActivities.cancelLoan(request.loanId, cancellationReason)
             currentLoanStatus = "CANCELLED"
