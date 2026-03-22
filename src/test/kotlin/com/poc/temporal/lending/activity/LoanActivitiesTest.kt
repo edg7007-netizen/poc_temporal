@@ -7,6 +7,7 @@ import com.poc.temporal.lending.domain.enums.LoanStatus
 import com.poc.temporal.lending.domain.enums.ProductType
 import com.poc.temporal.lending.repository.LoanRepository
 import com.poc.temporal.lending.repository.PaymentRepository
+import com.poc.temporal.lending.repository.WorkflowEventRepository
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
@@ -19,6 +20,7 @@ class LoanActivitiesTest {
 
     private lateinit var loanRepository: LoanRepository
     private lateinit var paymentRepository: PaymentRepository
+    private lateinit var workflowEventRepository: WorkflowEventRepository
     private lateinit var loanActivities: LoanActivitiesImpl
 
     private val product = LoanProduct(
@@ -40,7 +42,8 @@ class LoanActivitiesTest {
     fun setUp() {
         loanRepository = mock()
         paymentRepository = mock()
-        loanActivities = LoanActivitiesImpl(loanRepository, paymentRepository)
+        workflowEventRepository = mock()
+        loanActivities = LoanActivitiesImpl(loanRepository, paymentRepository, workflowEventRepository)
 
         loan = Loan(
             id = 1L,
@@ -54,6 +57,7 @@ class LoanActivitiesTest {
         whenever(loanRepository.findById(1L)).thenReturn(Optional.of(loan))
         whenever(loanRepository.save(any())).thenAnswer { it.arguments[0] }
         whenever(paymentRepository.save(any())).thenAnswer { it.arguments[0] }
+        whenever(workflowEventRepository.save(any())).thenAnswer { it.arguments[0] }
     }
 
     @Test

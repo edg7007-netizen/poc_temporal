@@ -10,6 +10,7 @@ import com.poc.temporal.lending.domain.enums.LoanStatus
 import com.poc.temporal.lending.domain.enums.ProductType
 import com.poc.temporal.lending.repository.LedgerEntryRepository
 import com.poc.temporal.lending.repository.PaymentRepository
+import com.poc.temporal.lending.repository.WorkflowEventRepository
 import com.poc.temporal.lending.service.LoanService
 import org.junit.jupiter.api.Test
 import org.mockito.kotlin.*
@@ -39,6 +40,9 @@ class LoanControllerTest {
 
     @MockBean
     private lateinit var paymentRepository: PaymentRepository
+
+    @MockBean
+    private lateinit var workflowEventRepository: WorkflowEventRepository
 
     private val product = LoanProduct(
         id = 1L,

@@ -2,10 +2,13 @@ package com.poc.temporal.lending.service
 
 import com.poc.temporal.lending.domain.Loan
 import com.poc.temporal.lending.domain.LoanProduct
+import com.poc.temporal.lending.domain.WorkflowEvent
 import com.poc.temporal.lending.domain.enums.LoanStatus
 import com.poc.temporal.lending.domain.enums.ProductType
+import com.poc.temporal.lending.domain.enums.WorkflowEventType
 import com.poc.temporal.lending.repository.LoanProductRepository
 import com.poc.temporal.lending.repository.LoanRepository
+import com.poc.temporal.lending.repository.WorkflowEventRepository
 import com.poc.temporal.lending.workflow.BulletLoanWorkflow
 import com.poc.temporal.lending.workflow.LoanWorkflow
 import com.poc.temporal.lending.workflow.LoanWorkflowRequest
@@ -20,7 +23,8 @@ import java.math.BigDecimal
 class LoanService(
     private val loanRepository: LoanRepository,
     private val loanProductRepository: LoanProductRepository,
-    private val workflowClient: WorkflowClient
+    private val workflowClient: WorkflowClient,
+    private val workflowEventRepository: WorkflowEventRepository
 ) {
 
     @Transactional
@@ -42,6 +46,18 @@ class LoanService(
         val workflowId = "loan-${loan.id}"
         loan.workflowId = workflowId
         loanRepository.save(loan)
+
+        workflowEventRepository.save(
+            WorkflowEvent(
+                loan = loan,
+                workflowId = workflowId,
+                eventType = WorkflowEventType.LOAN_CREATED,
+                fromStatus = null,
+                toStatus = LoanStatus.APPROVED,
+                description = "Loan created for borrower $borrowerId; " +
+                    "product=${product.name}, principal=$principalAmount; Temporal workflow $workflowId starting"
+            )
+        )
 
         val options = WorkflowOptions.newBuilder()
             .setWorkflowId(workflowId)

@@ -6,6 +6,7 @@ import com.poc.temporal.lending.api.dto.PaymentRequest
 import com.poc.temporal.lending.domain.Loan
 import com.poc.temporal.lending.repository.LedgerEntryRepository
 import com.poc.temporal.lending.repository.PaymentRepository
+import com.poc.temporal.lending.repository.WorkflowEventRepository
 import com.poc.temporal.lending.service.LoanService
 import jakarta.validation.Valid
 import org.springframework.http.HttpStatus
@@ -17,7 +18,8 @@ import org.springframework.web.bind.annotation.*
 class LoanController(
     private val loanService: LoanService,
     private val ledgerEntryRepository: LedgerEntryRepository,
-    private val paymentRepository: PaymentRepository
+    private val paymentRepository: PaymentRepository,
+    private val workflowEventRepository: WorkflowEventRepository
 ) {
 
     /** Create and disburse a new loan */
@@ -75,6 +77,11 @@ class LoanController(
     @GetMapping("/{loanId}/payments")
     fun getPayments(@PathVariable loanId: Long): ResponseEntity<Any> =
         ResponseEntity.ok(paymentRepository.findByLoanIdOrderByPaymentDateAsc(loanId))
+
+    /** Get Temporal workflow event history for a loan */
+    @GetMapping("/{loanId}/events")
+    fun getWorkflowEvents(@PathVariable loanId: Long): ResponseEntity<Any> =
+        ResponseEntity.ok(workflowEventRepository.findByLoanIdOrderByCreatedAtAsc(loanId))
 
     /** Global error handler */
     @ExceptionHandler(IllegalArgumentException::class)
