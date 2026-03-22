@@ -11,7 +11,7 @@ import java.math.BigDecimal
 data class LoanWorkflowRequest(
     val loanId: Long = 0,
     val borrowerId: String = "",
-    val productType: ProductType = ProductType.TERM_LOAN,
+    val productType: ProductType = ProductType.INSTALLMENTS,
     val interestAccrualMethod: InterestAccrualMethod = InterestAccrualMethod.DAILY,
     val principalAmount: BigDecimal = BigDecimal.ZERO,
     val annualInterestRate: BigDecimal = BigDecimal.ZERO,

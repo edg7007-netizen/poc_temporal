@@ -42,8 +42,8 @@ class LoanControllerTest {
 
     private val product = LoanProduct(
         id = 1L,
-        name = "Personal Term Loan",
-        productType = ProductType.TERM_LOAN,
+        name = "Installments",
+        productType = ProductType.INSTALLMENTS,
         interestAccrualMethod = InterestAccrualMethod.DAILY,
         annualInterestRate = BigDecimal("0.18"),
         numberOfPaymentCycles = 12,
@@ -119,7 +119,7 @@ class LoanControllerTest {
                 "status" to "ACTIVE",
                 "outstandingBalance" to BigDecimal("5000.00"),
                 "inCooldown" to false,
-                "productName" to "Personal Term Loan",
+                "productName" to "Installments",
                 "borrowerId" to "borrower-001"
             )
         )

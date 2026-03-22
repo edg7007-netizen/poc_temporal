@@ -24,7 +24,7 @@ class LedgerActivitiesTest {
     private val product = LoanProduct(
         id = 1L,
         name = "Test Product",
-        productType = ProductType.TERM_LOAN,
+        productType = ProductType.INSTALLMENTS,
         interestAccrualMethod = InterestAccrualMethod.DAILY,
         annualInterestRate = BigDecimal("0.18"),
         numberOfPaymentCycles = 12,

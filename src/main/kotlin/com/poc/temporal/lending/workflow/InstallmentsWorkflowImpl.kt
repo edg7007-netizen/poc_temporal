@@ -7,7 +7,7 @@ import java.math.RoundingMode
 import java.time.Duration
 
 /**
- * Manages the lifecycle of a **Term Loan**:
+ * Manages the lifecycle of an **Installments** loan:
  *
  * 1. Disburse principal and start daily interest tracking.
  * 2. For each monthly payment cycle, accrue interest daily and watch for a payment signal.
@@ -19,16 +19,16 @@ import java.time.Duration
  * after server restarts without losing state.
  */
 @WorkflowImpl(taskQueues = ["lending-task-queue"])
-class TermLoanWorkflowImpl : AbstractLoanWorkflow(), TermLoanWorkflow {
+class InstallmentsWorkflowImpl : AbstractLoanWorkflow(), InstallmentsWorkflow {
 
     override fun execute(request: LoanWorkflowRequest) {
-        logger.info("Starting Term Loan workflow for loanId=${request.loanId}")
+        logger.info("Starting Installments workflow for loanId=${request.loanId}")
 
         disburseAndActivateLoan(request)
         runMonthlyPaymentCycles(request)
         finalizeLoan(request)
 
-        logger.info("Term Loan workflow completed for loanId=${request.loanId}, status=$currentLoanStatus")
+        logger.info("Installments workflow completed for loanId=${request.loanId}, status=$currentLoanStatus")
     }
 
     // ── Step 1: Disbursement ───────────────────────────────────────────────────

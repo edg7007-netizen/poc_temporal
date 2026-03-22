@@ -12,12 +12,12 @@ import java.math.BigDecimal
 import java.time.Duration
 
 /**
- * Tests for the [BulletLoanWorkflowImpl] workflow.
+ * Tests for the [CDDWorkflowImpl] workflow.
  *
  * Covers: upfront interest charge, single payment by maturity, maturity default + late fee,
  * paid-off + cooldown sequence, and query methods.
  */
-class BulletLoanWorkflowTest {
+class CDDWorkflowTest {
 
     private lateinit var testEnv: io.temporal.testing.TestWorkflowEnvironment
     private lateinit var loanAct: TestLoanActivities
@@ -27,7 +27,7 @@ class BulletLoanWorkflowTest {
     fun setUp() {
         testEnv = buildTestEnvironment()
         val worker = testEnv.newWorker(TEST_TASK_QUEUE)
-        worker.registerWorkflowImplementationTypes(BulletLoanWorkflowImpl::class.java)
+        worker.registerWorkflowImplementationTypes(CDDWorkflowImpl::class.java)
 
         loanAct = TestLoanActivities()
         ledgerAct = TestLedgerActivities()
@@ -40,8 +40,8 @@ class BulletLoanWorkflowTest {
 
     private fun newRequest(cycles: Int = 1) = LoanWorkflowRequest(
         loanId = 2L,
-        borrowerId = "borrower-bullet",
-        productType = ProductType.BULLET_LOAN,
+        borrowerId = "borrower-cdd",
+        productType = ProductType.CDD,
         interestAccrualMethod = InterestAccrualMethod.FIXED_UPFRONT,
         principalAmount = BigDecimal("1000.00"),
         annualInterestRate = BigDecimal("0.32"),
@@ -52,10 +52,10 @@ class BulletLoanWorkflowTest {
     )
 
     private fun newStub() = testEnv.workflowClient.newWorkflowStub(
-        BulletLoanWorkflow::class.java,
+        CDDWorkflow::class.java,
         WorkflowOptions.newBuilder()
             .setTaskQueue(TEST_TASK_QUEUE)
-            .setWorkflowId("test-bullet-${System.nanoTime()}")
+            .setWorkflowId("test-cdd-${System.nanoTime()}")
             .build()
     )
 

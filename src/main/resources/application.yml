@@ -32,8 +32,8 @@ spring.temporal:
   workers:
     - task-queue: lending-task-queue
       workflow-classes:
-        - com.poc.temporal.lending.workflow.TermLoanWorkflowImpl
-        - com.poc.temporal.lending.workflow.BulletLoanWorkflowImpl
+        - com.poc.temporal.lending.workflow.InstallmentsWorkflowImpl
+        - com.poc.temporal.lending.workflow.CDDWorkflowImpl
       activity-beans:
         - loanActivitiesImpl
         - ledgerActivitiesImpl

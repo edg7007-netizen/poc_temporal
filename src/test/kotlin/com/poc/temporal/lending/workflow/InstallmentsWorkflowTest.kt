@@ -12,12 +12,12 @@ import java.math.BigDecimal
 import java.time.Duration
 
 /**
- * Tests for the [TermLoanWorkflowImpl] workflow.
+ * Tests for the [InstallmentsWorkflowImpl] workflow.
  *
  * Covers: daily interest accrual, payment-per-cycle, late-fee + grace period on miss,
  * paid-off + cooldown sequence, and query methods.
  */
-class TermLoanWorkflowTest {
+class InstallmentsWorkflowTest {
 
     private lateinit var testEnv: io.temporal.testing.TestWorkflowEnvironment
     private lateinit var loanAct: TestLoanActivities
@@ -27,7 +27,7 @@ class TermLoanWorkflowTest {
     fun setUp() {
         testEnv = buildTestEnvironment()
         val worker = testEnv.newWorker(TEST_TASK_QUEUE)
-        worker.registerWorkflowImplementationTypes(TermLoanWorkflowImpl::class.java)
+        worker.registerWorkflowImplementationTypes(InstallmentsWorkflowImpl::class.java)
 
         loanAct = TestLoanActivities()
         ledgerAct = TestLedgerActivities()
@@ -40,8 +40,8 @@ class TermLoanWorkflowTest {
 
     private fun newRequest(cycles: Int = 3) = LoanWorkflowRequest(
         loanId = 1L,
-        borrowerId = "borrower-term",
-        productType = ProductType.TERM_LOAN,
+        borrowerId = "borrower-installments",
+        productType = ProductType.INSTALLMENTS,
         interestAccrualMethod = InterestAccrualMethod.DAILY,
         principalAmount = BigDecimal("1000.00"),
         annualInterestRate = BigDecimal("0.18"),
@@ -52,10 +52,10 @@ class TermLoanWorkflowTest {
     )
 
     private fun newStub() = testEnv.workflowClient.newWorkflowStub(
-        TermLoanWorkflow::class.java,
+        InstallmentsWorkflow::class.java,
         WorkflowOptions.newBuilder()
             .setTaskQueue(TEST_TASK_QUEUE)
-            .setWorkflowId("test-term-${System.nanoTime()}")
+            .setWorkflowId("test-installments-${System.nanoTime()}")
             .build()
     )
 

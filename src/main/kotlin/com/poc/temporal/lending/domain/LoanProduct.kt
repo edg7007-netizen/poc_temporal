@@ -9,8 +9,8 @@ import java.math.BigDecimal
  * Represents a lending product template. All loans are created from a product.
  *
  * Two representative products are pre-seeded:
- *  1. Term Loan  – monthly installments, daily accrual, single withdrawal.
- *  2. Bullet Loan – single payment at maturity, fixed upfront interest.
+ *  1. Installments – monthly installments, daily accrual, single withdrawal.
+ *  2. CDD (Custom Due Date) – single payment at maturity, fixed upfront interest.
  */
 @Entity
 @Table(name = "loan_products")
@@ -35,7 +35,7 @@ data class LoanProduct(
     @Column(nullable = false, precision = 8, scale = 6)
     val annualInterestRate: BigDecimal,
 
-    /** For BULLET_LOAN: the flat interest rate applied to principal upfront */
+    /** For CDD: the flat interest rate applied to principal upfront */
     @Column(precision = 8, scale = 6)
     val flatInterestRate: BigDecimal? = null,
 

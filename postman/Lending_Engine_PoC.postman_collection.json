@@ -2,7 +2,7 @@
   "info": {
     "name": "Lending Engine PoC",
     "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "description": "Step-by-step demonstration of the Temporal Lending Engine PoC.\n\n## Prerequisites\n1. Temporal Server running on `localhost:7233` (e.g. via `temporal server start-dev`)\n2. Spring Boot app running on `localhost:8080` (e.g. via `./gradlew bootRun` \u2014 this also auto-starts the PostgreSQL container)\n\n## Collection variables\n| Variable | Default | Description |\n|---|---|---|\n| `baseUrl` | `http://localhost:8080` | Spring Boot base URL |\n| `termLoanId` | *(auto-set)* | ID of the Term Loan created in the Term Loan folder |\n| `bulletLoanId` | *(auto-set)* | ID of the Bullet Loan created in the Bullet Loan folder |\n| `cancelLoanId` | *(auto-set)* | ID of the loan created in the Cancel Flow folder |\n| `borrowerId` | `borrower-demo-001` | Borrower used for Term Loan and Cancel Flow scenarios |\n| `bulletBorrowerId` | `borrower-demo-002` | Separate borrower for the Bullet Loan scenario (avoids one-active-loan constraint) |\n\n## How to use\nRun each folder **in order** from top to bottom. Within each folder, run requests from Step 1 downward. Test scripts automatically capture IDs from responses and store them as collection variables.",
+    "description": "Step-by-step demonstration of the Temporal Lending Engine PoC.\n\n## Prerequisites\n1. Temporal Server running on `localhost:7233` (e.g. via `temporal server start-dev`)\n2. Spring Boot app running on `localhost:8080` (e.g. via `./gradlew bootRun` \u2014 this also auto-starts the PostgreSQL container)\n\n## Collection variables\n| Variable | Default | Description |\n|---|---|---|\n| `baseUrl` | `http://localhost:8080` | Spring Boot base URL |\n| `termLoanId` | *(auto-set)* | ID of the Installments loan created in the Installments folder |\n| `bulletLoanId` | *(auto-set)* | ID of the CDD loan created in the CDD folder |\n| `cancelLoanId` | *(auto-set)* | ID of the loan created in the Cancel Flow folder |\n| `borrowerId` | `borrower-demo-001` | Borrower used for Installments and Cancel Flow scenarios |\n| `bulletBorrowerId` | `borrower-demo-002` | Separate borrower for the CDD scenario (avoids one-active-loan constraint) |\n\n## How to use\nRun each folder **in order** from top to bottom. Within each folder, run requests from Step 1 downward. Test scripts automatically capture IDs from responses and store them as collection variables.",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
   "variable": [
@@ -40,7 +40,7 @@
   "item": [
     {
       "name": "1. Loan Products",
-      "description": "Explore the two pre-seeded loan products. Both are inserted into the `loan_products` table on startup by `data.sql`.\n\n- **Personal Term Loan** (id=1): 12-month installment, 18% APR daily accrual, max $50,000\n- **Short-Term Bullet Loan** (id=2): 3-month single payment, 8% flat upfront interest, max $10,000",
+      "description": "Explore the two pre-seeded loan products. Both are inserted into the `loan_products` table on startup by `data.sql`.\n\n- **Installments** (id=1): 12-month installment, 18% APR daily accrual, max $50,000\n- **CDD (Custom Due Date)** (id=2): 3-month single payment, 8% flat upfront interest, max $10,000",
       "item": [
         {
           "name": "List all products",
@@ -76,7 +76,7 @@
           ]
         },
         {
-          "name": "Get Personal Term Loan product",
+          "name": "Get Installments product",
           "request": {
             "method": "GET",
             "header": [],
@@ -91,7 +91,7 @@
                 "1"
               ]
             },
-            "description": "Details for the Personal Term Loan product:\n- `productType`: `TERM_LOAN`\n- `interestAccrualMethod`: `DAILY` (interest accrues every day)\n- `annualInterestRate`: 0.18 (18% APR)\n- `numberOfPaymentCycles`: 12 (monthly payments)\n- `cooldownPeriodDays`: 30 (borrower must wait 30 days before re-applying)"
+            "description": "Details for the Installments product:\n- `productType`: `INSTALLMENTS`\n- `interestAccrualMethod`: `DAILY` (interest accrues every day)\n- `annualInterestRate`: 0.18 (18% APR)\n- `numberOfPaymentCycles`: 12 (monthly payments)\n- `cooldownPeriodDays`: 30 (borrower must wait 30 days before re-applying)"
           },
           "event": [
             {
@@ -100,8 +100,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Is a Term Loan', () => {",
-                  "    pm.expect(pm.response.json().productType).to.eql('TERM_LOAN');",
+                  "pm.test('Is an Installments product', () => {",
+                  "    pm.expect(pm.response.json().productType).to.eql('INSTALLMENTS');",
                   "});"
                 ]
               }
@@ -109,7 +109,7 @@
           ]
         },
         {
-          "name": "Get Short-Term Bullet Loan product",
+          "name": "Get CDD (Custom Due Date) product",
           "request": {
             "method": "GET",
             "header": [],
@@ -124,7 +124,7 @@
                 "2"
               ]
             },
-            "description": "Details for the Short-Term Bullet Loan product:\n- `productType`: `BULLET_LOAN`\n- `interestAccrualMethod`: `FIXED_UPFRONT` (flat interest charged immediately at disbursement)\n- `flatInterestRate`: 0.08 (8% of principal added upfront)\n- `numberOfPaymentCycles`: 3 (3-month maturity window)\n- `cooldownPeriodDays`: 15"
+            "description": "Details for the CDD (Custom Due Date) product:\n- `productType`: `CDD`\n- `interestAccrualMethod`: `FIXED_UPFRONT` (flat interest charged immediately at disbursement)\n- `flatInterestRate`: 0.08 (8% of principal added upfront)\n- `numberOfPaymentCycles`: 3 (3-month maturity window)\n- `cooldownPeriodDays`: 15"
           },
           "event": [
             {
@@ -133,8 +133,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test('Status 200', () => pm.response.to.have.status(200));",
-                  "pm.test('Is a Bullet Loan', () => {",
-                  "    pm.expect(pm.response.json().productType).to.eql('BULLET_LOAN');",
+                  "pm.test('Is a CDD product', () => {",
+                  "    pm.expect(pm.response.json().productType).to.eql('CDD');",
                   "});"
                 ]
               }
@@ -144,11 +144,11 @@
       ]
     },
     {
-      "name": "2. Term Loan \u2013 Full Lifecycle",
-      "description": "Demonstrates the full lifecycle of a **Term Loan** driven by a Temporal workflow.\n\n### What Temporal does automatically\nAfter the loan is created (Step 1), the `TermLoanWorkflowImpl` runs in the background:\n1. Calls `disburseLoan` activity \u2192 DB status changes `APPROVED \u2192 ACTIVE`\n2. Calls `recordDisbursement` ledger activity \u2192 DISBURSEMENT entry created\n3. For each of 12 monthly cycles:\n   - Calls `recordDailyInterest` 30 times (one per day, using Temporal timers)\n   - Waits for a `receivePayment` signal\n4. On payment: calls `applyPayment` and `recordPayment` activities\n5. When balance reaches zero: calls `markPaidOff`, `startCooldown`, then `endCooldown` (after 30-day timer)\n\n### Verifying Temporal internals via the database\nAfter each step, query `GET /ledger` (financial audit trail), `GET /payments` (payment records).",
+      "name": "2. Installments \u2013 Full Lifecycle",
+      "description": "Demonstrates the full lifecycle of an **Installments** loan driven by a Temporal workflow.\n\n### What Temporal does automatically\nAfter the loan is created (Step 1), the `InstallmentsWorkflowImpl` runs in the background:\n1. Calls `disburseLoan` activity \u2192 DB status changes `APPROVED \u2192 ACTIVE`\n2. Calls `recordDisbursement` ledger activity \u2192 DISBURSEMENT entry created\n3. For each of 12 monthly cycles:\n   - Calls `recordDailyInterest` 30 times (one per day, using Temporal timers)\n   - Waits for a `receivePayment` signal\n4. On payment: calls `applyPayment` and `recordPayment` activities\n5. When balance reaches zero: calls `markPaidOff`, `startCooldown`, then `endCooldown` (after 30-day timer)\n\n### Verifying Temporal internals via the database\nAfter each step, query `GET /ledger` (financial audit trail), `GET /payments` (payment records).",
       "item": [
         {
-          "name": "Step 1 \u2013 Create Term Loan",
+          "name": "Step 1 \u2013 Create Installments Loan",
           "request": {
             "method": "POST",
             "header": [
@@ -171,7 +171,7 @@
                 "loans"
               ]
             },
-            "description": "Creates a $5,000 Term Loan for the demo borrower.\n\n**What happens internally:**\n1. `LoanService` validates the product limits ($500\u2013$50,000 \u2713)\n2. A `Loan` record is persisted with status `APPROVED`\n3. A `LOAN_CREATED` event is written to `workflow_events`\n4. The `TermLoanWorkflowImpl` is started in Temporal with id `loan-{id}`\n\nThe test script captures `termLoanId` for subsequent requests."
+            "description": "Creates a $5,000 Installments loan for the demo borrower.\n\n**What happens internally:**\n1. `LoanService` validates the product limits ($500\u2013$50,000 \u2713)\n2. A `Loan` record is persisted with status `APPROVED`\n3. The loan record is persisted with status `APPROVED`\n4. The `InstallmentsWorkflowImpl` is started in Temporal with id `loan-{id}`\n\nThe test script captures `termLoanId` for subsequent requests."
           },
           "event": [
             {
@@ -380,7 +380,7 @@
                 "{{borrowerId}}"
               ]
             },
-            "description": "Lists all loans associated with the demo borrower. After running the Term and Bullet Loan scenarios you should see both loans here."
+            "description": "Lists all loans associated with the demo borrower. After running the Installments and CDD scenarios you should see both loans here."
           },
           "event": [
             {
@@ -398,11 +398,11 @@
       ]
     },
     {
-      "name": "3. Bullet Loan \u2013 Full Lifecycle",
-      "description": "Demonstrates the full lifecycle of a **Bullet Loan** driven by a Temporal workflow.\n\n### What Temporal does automatically\nAfter creation, `BulletLoanWorkflowImpl` runs:\n1. Calls `disburseLoan` activity \u2192 `APPROVED \u2192 ACTIVE`\n2. Calls `recordDisbursement` (principal) + `recordUpfrontInterest` (8% flat) activities\n3. Starts a single **3-month timer** (`Workflow.sleep(90 days)`) waiting for one full payment\n4. On payment: calls `applyPayment` and `recordPayment`\n5. On paid-off: `markPaidOff` \u2192 `startCooldown` (15 days) \u2192 `endCooldown`\n\n**Note:** The borrower using the same `borrowerId` as the Term Loan scenario will be blocked by the 'one active loan' rule. This folder uses the `{{bulletBorrowerId}}` variable (default: `borrower-demo-002`) to avoid that conflict. You can change it in the collection Variables tab.",
+      "name": "3. CDD \u2013 Full Lifecycle",
+      "description": "Demonstrates the full lifecycle of a **CDD (Custom Due Date)** loan driven by a Temporal workflow.\n\n### What Temporal does automatically\nAfter creation, `CDDWorkflowImpl` runs:\n1. Calls `disburseLoan` activity \u2192 `APPROVED \u2192 ACTIVE`\n2. Calls `recordDisbursement` (principal) + `recordUpfrontInterest` (8% flat) activities\n3. Starts a single **3-month timer** (`Workflow.sleep(90 days)`) waiting for one full payment\n4. On payment: calls `applyPayment` and `recordPayment`\n5. On paid-off: `markPaidOff` \u2192 `startCooldown` (15 days) \u2192 `endCooldown`\n\n**Note:** The borrower using the same `borrowerId` as the Term Loan scenario will be blocked by the 'one active loan' rule. This folder uses the `{{bulletBorrowerId}}` variable (default: `borrower-demo-002`) to avoid that conflict. You can change it in the collection Variables tab.",
       "item": [
         {
-          "name": "Step 1 \u2013 Create Bullet Loan",
+          "name": "Step 1 \u2013 Create CDD Loan",
           "request": {
             "method": "POST",
             "header": [
@@ -425,7 +425,7 @@
                 "loans"
               ]
             },
-            "description": "Creates a $2,000 Bullet Loan.\n\n**Upfront interest calculation:**\n- Principal: $2,000\n- Flat rate: 8%\n- Upfront interest: $160.00\n- Total amount due at maturity: $2,160.00\n\nA `LOAN_CREATED` event is written immediately. Once the workflow runs `disburseLoan` + `recordUpfrontInterest`, the ledger will show DISBURSEMENT ($2,000) + INTEREST_ACCRUAL ($160).\n\nUses `{{bulletBorrowerId}}` (default: `borrower-demo-002`) to avoid the one-active-loan constraint. Change this variable in the collection Variables tab if needed."
+            "description": "Creates a $2,000 CDD (Custom Due Date) loan.\n\n**Upfront interest calculation:**\n- Principal: $2,000\n- Flat rate: 8%\n- Upfront interest: $160.00\n- Total amount due at maturity: $2,160.00\n\nA `LOAN_CREATED` event is written immediately. Once the workflow runs `disburseLoan` + `recordUpfrontInterest`, the ledger will show DISBURSEMENT ($2,000) + INTEREST_ACCRUAL ($160).\n\nUses `{{bulletBorrowerId}}` (default: `borrower-demo-002`) to avoid the one-active-loan constraint. Change this variable in the collection Variables tab if needed."
           },
           "event": [
             {
@@ -493,7 +493,7 @@
                 "ledger"
               ]
             },
-            "description": "After disbursement you should see **two** ledger entries:\n1. `DISBURSEMENT` \u2014 +$2,000 principal\n2. `INTEREST_ACCRUAL` \u2014 +$160 upfront flat interest\n\nRunning balance after entry 2: $2,160.00\n\nThis contrasts with the Term Loan where interest accrues slowly day by day."
+            "description": "After disbursement you should see **two** ledger entries:\n1. `DISBURSEMENT` \u2014 +$2,000 principal\n2. `INTEREST_ACCRUAL` \u2014 +$160 upfront flat interest\n\nRunning balance after entry 2: $2,160.00\n\nThis contrasts with the Installments product where interest accrues slowly day by day."
           },
           "event": [
             {
@@ -769,7 +769,7 @@
                 "loans"
               ]
             },
-            "description": "The Personal Term Loan has a minimum of $500. Requesting $10 fails business validation in `LoanService.validateLoanCreation` with `400 Bad Request`."
+            "description": "The Installments product has a minimum of $500. Requesting $10 fails business validation in `LoanService.validateLoanCreation` with `400 Bad Request`."
           },
           "event": [
             {

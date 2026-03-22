@@ -7,7 +7,7 @@ import java.math.RoundingMode
 import java.time.Duration
 
 /**
- * Manages the lifecycle of a **Bullet Loan**:
+ * Manages the lifecycle of a **CDD (Custom Due Date)** loan:
  *
  * 1. Disburse principal and charge a flat interest amount upfront.
  * 2. Wait for a single full payment by the maturity date.
@@ -19,16 +19,16 @@ import java.time.Duration
  * after server restarts without losing state.
  */
 @WorkflowImpl(taskQueues = ["lending-task-queue"])
-class BulletLoanWorkflowImpl : AbstractLoanWorkflow(), BulletLoanWorkflow {
+class CDDWorkflowImpl : AbstractLoanWorkflow(), CDDWorkflow {
 
     override fun execute(request: LoanWorkflowRequest) {
-        logger.info("Starting Bullet Loan workflow for loanId=${request.loanId}")
+        logger.info("Starting CDD workflow for loanId=${request.loanId}")
 
         disburseWithUpfrontInterest(request)
         waitForPaymentOrHandleMaturityDefault(request)
         finalizeLoan(request)
 
-        logger.info("Bullet Loan workflow completed for loanId=${request.loanId}, status=$currentLoanStatus")
+        logger.info("CDD workflow completed for loanId=${request.loanId}, status=$currentLoanStatus")
     }
 
     // ── Step 1: Disbursement with upfront interest ─────────────────────────────

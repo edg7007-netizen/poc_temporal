@@ -6,10 +6,10 @@ import com.poc.temporal.lending.domain.enums.LoanStatus
 import com.poc.temporal.lending.domain.enums.ProductType
 import com.poc.temporal.lending.repository.LoanProductRepository
 import com.poc.temporal.lending.repository.LoanRepository
-import com.poc.temporal.lending.workflow.BulletLoanWorkflow
+import com.poc.temporal.lending.workflow.CDDWorkflow
+import com.poc.temporal.lending.workflow.InstallmentsWorkflow
 import com.poc.temporal.lending.workflow.LoanWorkflow
 import com.poc.temporal.lending.workflow.LoanWorkflowRequest
-import com.poc.temporal.lending.workflow.TermLoanWorkflow
 import io.temporal.client.WorkflowClient
 import io.temporal.client.WorkflowOptions
 import org.springframework.stereotype.Service
@@ -129,12 +129,12 @@ class LoanService(
     /** Starts the correct workflow type for the given product. */
     private fun startWorkflow(productType: ProductType, options: WorkflowOptions, request: LoanWorkflowRequest) {
         when (productType) {
-            ProductType.TERM_LOAN -> {
-                val stub = workflowClient.newWorkflowStub(TermLoanWorkflow::class.java, options)
+            ProductType.INSTALLMENTS -> {
+                val stub = workflowClient.newWorkflowStub(InstallmentsWorkflow::class.java, options)
                 WorkflowClient.start(stub::execute, request)
             }
-            ProductType.BULLET_LOAN -> {
-                val stub = workflowClient.newWorkflowStub(BulletLoanWorkflow::class.java, options)
+            ProductType.CDD -> {
+                val stub = workflowClient.newWorkflowStub(CDDWorkflow::class.java, options)
                 WorkflowClient.start(stub::execute, request)
             }
         }
@@ -147,10 +147,10 @@ class LoanService(
     private fun workflowStubFor(loan: Loan): LoanWorkflow {
         val workflowId = loan.workflowId ?: throw IllegalStateException("Loan ${loan.id} has no workflow")
         return when (loan.product.productType) {
-            ProductType.TERM_LOAN ->
-                workflowClient.newWorkflowStub(TermLoanWorkflow::class.java, workflowId)
-            ProductType.BULLET_LOAN ->
-                workflowClient.newWorkflowStub(BulletLoanWorkflow::class.java, workflowId)
+            ProductType.INSTALLMENTS ->
+                workflowClient.newWorkflowStub(InstallmentsWorkflow::class.java, workflowId)
+            ProductType.CDD ->
+                workflowClient.newWorkflowStub(CDDWorkflow::class.java, workflowId)
         }
     }
 
