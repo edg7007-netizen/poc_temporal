@@ -32,8 +32,14 @@ dependencies {
     implementation("io.temporal:temporal-sdk:1.30.1")
     implementation("io.temporal:temporal-spring-boot-starter:1.30.1")
 
-    // H2 for development/testing
-    runtimeOnly("com.h2database:h2")
+    // PostgreSQL driver
+    runtimeOnly("org.postgresql:postgresql")
+
+    // Starts a local Docker Compose stack automatically when running the app (not during tests)
+    developmentOnly("org.springframework.boot:spring-boot-docker-compose")
+
+    // H2 kept for test-only use (no real DB needed: all tests mock repositories)
+    testRuntimeOnly("com.h2database:h2")
 
     // Test dependencies
     testImplementation("org.springframework.boot:spring-boot-starter-test")
