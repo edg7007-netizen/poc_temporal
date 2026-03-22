@@ -1,0 +1,832 @@
+{
+  "info": {
+    "name": "Lending Engine PoC",
+    "_postman_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+    "description": "Step-by-step demonstration of the Temporal Lending Engine PoC.\n\n## Prerequisites\n1. Temporal Server running on `localhost:7233` (e.g. via `temporal server start-dev`)\n2. Spring Boot app running on `localhost:8080` (e.g. via `./gradlew bootRun` \u2014 this also auto-starts the PostgreSQL container)\n\n## Collection variables\n| Variable | Default | Description |\n|---|---|---|\n| `baseUrl` | `http://localhost:8080` | Spring Boot base URL |\n| `termLoanId` | *(auto-set)* | ID of the Installments loan created in the Installments folder |\n| `bulletLoanId` | *(auto-set)* | ID of the CDD loan created in the CDD folder |\n| `cancelLoanId` | *(auto-set)* | ID of the loan created in the Cancel Flow folder |\n| `borrowerId` | `borrower-demo-001` | Borrower used for Installments and Cancel Flow scenarios |\n| `bulletBorrowerId` | `borrower-demo-002` | Separate borrower for the CDD scenario (avoids one-active-loan constraint) |\n\n## How to use\nRun each folder **in order** from top to bottom. Within each folder, run requests from Step 1 downward. Test scripts automatically capture IDs from responses and store them as collection variables.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080",
+      "type": "string"
+    },
+    {
+      "key": "termLoanId",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "bulletLoanId",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "cancelLoanId",
+      "value": "0",
+      "type": "string"
+    },
+    {
+      "key": "borrowerId",
+      "value": "borrower-demo-001",
+      "type": "string"
+    },
+    {
+      "key": "bulletBorrowerId",
+      "value": "borrower-demo-002",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Loan Products",
+      "description": "Explore the two pre-seeded loan products. Both are inserted into the `loan_products` table on startup by `data.sql`.\n\n- **Installments** (id=1): 12-month installment, 18% APR daily accrual, max $50,000\n- **CDD (Custom Due Date)** (id=2): 3-month single payment, 8% flat upfront interest, max $10,000",
+      "item": [
+        {
+          "name": "List all products",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products"
+              ]
+            },
+            "description": "Returns all active loan products. Confirm the two seeded products are present before creating loans."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('At least two products', () => {",
+                  "    const body = pm.response.json();",
+                  "    pm.expect(body.length).to.be.at.least(2);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get Installments product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/1",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "1"
+              ]
+            },
+            "description": "Details for the Installments product:\n- `productType`: `INSTALLMENTS`\n- `interestAccrualMethod`: `DAILY` (interest accrues every day)\n- `annualInterestRate`: 0.18 (18% APR)\n- `numberOfPaymentCycles`: 12 (monthly payments)\n- `cooldownPeriodDays`: 30 (borrower must wait 30 days before re-applying)"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Is an Installments product', () => {",
+                  "    pm.expect(pm.response.json().productType).to.eql('INSTALLMENTS');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Get CDD (Custom Due Date) product",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/products/2",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "products",
+                "2"
+              ]
+            },
+            "description": "Details for the CDD (Custom Due Date) product:\n- `productType`: `CDD`\n- `interestAccrualMethod`: `FIXED_UPFRONT` (flat interest charged immediately at disbursement)\n- `flatInterestRate`: 0.08 (8% of principal added upfront)\n- `numberOfPaymentCycles`: 3 (3-month maturity window)\n- `cooldownPeriodDays`: 15"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Is a CDD product', () => {",
+                  "    pm.expect(pm.response.json().productType).to.eql('CDD');",
+                  "});"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2. Installments \u2013 Full Lifecycle",
+      "description": "Demonstrates the full lifecycle of an **Installments** loan driven by a Temporal workflow.\n\n### What Temporal does automatically\nAfter the loan is created (Step 1), the `InstallmentsWorkflowImpl` runs in the background:\n1. Calls `disburseLoan` activity \u2192 DB status changes `APPROVED \u2192 ACTIVE`\n2. Calls `recordDisbursement` ledger activity \u2192 DISBURSEMENT entry created\n3. For each of 12 monthly cycles:\n   - Calls `recordDailyInterest` 30 times (one per day, using Temporal timers)\n   - Waits for a `receivePayment` signal\n4. On payment: calls `applyPayment` and `recordPayment` activities\n5. When balance reaches zero: calls `markPaidOff`, `startCooldown`, then `endCooldown` (after 30-day timer)\n\n### Verifying Temporal internals via the database\nAfter each step, query `GET /ledger` (financial audit trail), `GET /payments` (payment records).",
+      "item": [
+        {
+          "name": "Step 1 \u2013 Create Installments Loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrowerId\": \"{{borrowerId}}\",\n  \"productId\": 1,\n  \"principalAmount\": 5000.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans"
+              ]
+            },
+            "description": "Creates a $5,000 Installments loan for the demo borrower.\n\n**What happens internally:**\n1. `LoanService` validates the product limits ($500\u2013$50,000 \u2713)\n2. A `Loan` record is persisted with status `APPROVED`\n3. The loan record is persisted with status `APPROVED`\n4. The `InstallmentsWorkflowImpl` is started in Temporal with id `loan-{id}`\n\nThe test script captures `termLoanId` for subsequent requests."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('Loan ID is positive', () => pm.expect(pm.response.json().id).to.be.above(0));",
+                  "pm.test('Status is APPROVED', () => pm.expect(pm.response.json().status).to.eql('APPROVED'));",
+                  "if (pm.response.code === 201) {",
+                  "    const loan = pm.response.json();",
+                  "    pm.collectionVariables.set('termLoanId', loan.id);",
+                  "    console.log('termLoanId set to ' + loan.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 2 \u2013 Get loan details",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{termLoanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{termLoanId}}"
+              ]
+            },
+            "description": "Fetches the loan record from the `loans` table. At this point the Temporal workflow may have already run `disburseLoan`, flipping the status to `ACTIVE`. Run again after a short pause if you still see `APPROVED`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Correct loan ID', () => {",
+                  "    pm.expect(String(pm.response.json().id)).to.eql(pm.collectionVariables.get('termLoanId'));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 3 \u2013 Query live Temporal workflow status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{termLoanId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{termLoanId}}",
+                "status"
+              ]
+            },
+            "description": "Queries the running Temporal workflow directly via a `@QueryMethod`.\n\n**Key fields:**\n- `status` \u2014 live state inside the workflow (may be more current than the DB)\n- `outstandingBalance` \u2014 current balance including accrued interest\n- `inCooldown` \u2014 whether the post-payoff cooldown timer is running\n\nOnce the workflow has disbursed the loan, `status` will read `ACTIVE`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Response has status field', () => pm.expect(pm.response.json()).to.have.property('status'));",
+                  "pm.test('Response has outstandingBalance field', () => pm.expect(pm.response.json()).to.have.property('outstandingBalance'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 4 \u2013 Submit a payment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 5500.00,\n  \"referenceNumber\": \"PAY-TERM-001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{termLoanId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{termLoanId}}",
+                "payments"
+              ]
+            },
+            "description": "Sends a `receivePayment` **signal** to the running Temporal workflow.\n\n**What Temporal does:**\n1. The signal unblocks the `Workflow.await(...)` call inside the workflow\n2. `applyPayment` activity is invoked: late fees \u2192 interest \u2192 principal\n3. `recordPayment` activity writes a `PAYMENT` entry to `ledger_entries`\n4. A `PAYMENT_RECEIVED` event is written to `workflow_events`\n5. If `balance <= 0`, the workflow calls `markPaidOff` and then `startCooldown`\n\n**Note:** Overpaying ($5,500 > $5,000 principal + accrued interest) will pay off the loan immediately."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Message confirms payment', () => pm.expect(pm.response.json().message).to.include('Payment'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 5 \u2013 View ledger entries",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{termLoanId}}/ledger",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{termLoanId}}",
+                "ledger"
+              ]
+            },
+            "description": "Returns all rows from the `ledger_entries` table for this loan, ordered chronologically.\n\n**Expected entries after Step 4:**\n| # | entryType | amount | description |\n|---|---|---|---|\n| 1 | `DISBURSEMENT` | +5000.00 | Principal disbursed |\n| 2..N | `INTEREST_ACCRUAL` | +small | Daily interest accrued |\n| N+1 | `PAYMENT` | -5500.00 | Borrower payment applied |\n\nThe `runningBalance` column shows the cumulative balance after each entry, giving a complete financial audit trail."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Ledger is non-empty', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 6 \u2013 View payment history",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{termLoanId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{termLoanId}}",
+                "payments"
+              ]
+            },
+            "description": "Returns all rows from the `payments` table for this loan.\n\nEach payment record breaks down how the amount was applied:\n- `principalApplied` \u2014 portion that reduced the principal\n- `interestApplied` \u2014 portion that covered accrued interest\n- `lateFeesApplied` \u2014 portion that covered any late fees\n- `referenceNumber` \u2014 matches what was passed in Step 4"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('At least one payment', () => pm.expect(pm.response.json().length).to.be.at.least(1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 7 \u2013 List all loans for borrower",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/borrower/{{borrowerId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "borrower",
+                "{{borrowerId}}"
+              ]
+            },
+            "description": "Lists all loans associated with the demo borrower. After running the Installments and CDD scenarios you should see both loans here."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('At least one loan', () => pm.expect(pm.response.json().length).to.be.at.least(1));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3. CDD \u2013 Full Lifecycle",
+      "description": "Demonstrates the full lifecycle of a **CDD (Custom Due Date)** loan driven by a Temporal workflow.\n\n### What Temporal does automatically\nAfter creation, `CDDWorkflowImpl` runs:\n1. Calls `disburseLoan` activity \u2192 `APPROVED \u2192 ACTIVE`\n2. Calls `recordDisbursement` (principal) + `recordUpfrontInterest` (8% flat) activities\n3. Starts a single **3-month timer** (`Workflow.sleep(90 days)`) waiting for one full payment\n4. On payment: calls `applyPayment` and `recordPayment`\n5. On paid-off: `markPaidOff` \u2192 `startCooldown` (15 days) \u2192 `endCooldown`\n\n**Note:** The borrower using the same `borrowerId` as the Term Loan scenario will be blocked by the 'one active loan' rule. This folder uses the `{{bulletBorrowerId}}` variable (default: `borrower-demo-002`) to avoid that conflict. You can change it in the collection Variables tab.",
+      "item": [
+        {
+          "name": "Step 1 \u2013 Create CDD Loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrowerId\": \"{{bulletBorrowerId}}\",\n  \"productId\": 2,\n  \"principalAmount\": 2000.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans"
+              ]
+            },
+            "description": "Creates a $2,000 CDD (Custom Due Date) loan.\n\n**Upfront interest calculation:**\n- Principal: $2,000\n- Flat rate: 8%\n- Upfront interest: $160.00\n- Total amount due at maturity: $2,160.00\n\nA `LOAN_CREATED` event is written immediately. Once the workflow runs `disburseLoan` + `recordUpfrontInterest`, the ledger will show DISBURSEMENT ($2,000) + INTEREST_ACCRUAL ($160).\n\nUses `{{bulletBorrowerId}}` (default: `borrower-demo-002`) to avoid the one-active-loan constraint. Change this variable in the collection Variables tab if needed."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    const loan = pm.response.json();",
+                  "    pm.collectionVariables.set('bulletLoanId', loan.id);",
+                  "    console.log('bulletLoanId set to ' + loan.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 2 \u2013 Query live Temporal workflow status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{bulletLoanId}}/status",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{bulletLoanId}}",
+                "status"
+              ]
+            },
+            "description": "Queries the running workflow. After disbursement, `outstandingBalance` will be $2,160 (principal + 8% upfront interest). The workflow is now waiting up to 90 days for a `receivePayment` signal."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Has outstandingBalance', () => pm.expect(pm.response.json()).to.have.property('outstandingBalance'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 3 \u2013 View ledger (disbursement + upfront interest)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{bulletLoanId}}/ledger",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{bulletLoanId}}",
+                "ledger"
+              ]
+            },
+            "description": "After disbursement you should see **two** ledger entries:\n1. `DISBURSEMENT` \u2014 +$2,000 principal\n2. `INTEREST_ACCRUAL` \u2014 +$160 upfront flat interest\n\nRunning balance after entry 2: $2,160.00\n\nThis contrasts with the Installments product where interest accrues slowly day by day."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Ledger is non-empty', () => pm.expect(pm.response.json().length).to.be.above(0));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 4 \u2013 Submit full repayment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 2160.00,\n  \"referenceNumber\": \"PAY-BULLET-001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{bulletLoanId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{bulletLoanId}}",
+                "payments"
+              ]
+            },
+            "description": "Sends the full $2,160 repayment signal to the workflow. This satisfies `balance <= 0`, triggering `markPaidOff` and then the 15-day `startCooldown` timer."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Payment confirmed', () => pm.expect(pm.response.json().message).to.include('Payment'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4. Cancel Flow",
+      "description": "Demonstrates how to cancel a loan **before disbursement**.\n\nOnce a loan is created, the Temporal workflow starts and is briefly in `APPROVED` state before running `disburseLoan`. Sending a `cancelLoan` signal during this window causes the workflow to skip disbursement entirely and mark the loan `CANCELLED`.\n\n**Important:** This window is very short in practice. In a real system, the cancel endpoint is typically called by a business process (KYC failure, fraud check, borrower withdrawal) before the workflow advances.",
+      "item": [
+        {
+          "name": "Step 1 \u2013 Create loan to cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrowerId\": \"borrower-cancel-test\",\n  \"productId\": 1,\n  \"principalAmount\": 1000.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans"
+              ]
+            },
+            "description": "Creates a loan intended to be cancelled. Uses a distinct `borrowerId` so it doesn't conflict with the other scenarios."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 201 Created', () => pm.response.to.have.status(201));",
+                  "if (pm.response.code === 201) {",
+                  "    const loan = pm.response.json();",
+                  "    pm.collectionVariables.set('cancelLoanId', loan.id);",
+                  "    console.log('cancelLoanId set to ' + loan.id);",
+                  "}"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 2 \u2013 Cancel the loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"reason\": \"Customer withdrew application\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{cancelLoanId}}/cancel",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{cancelLoanId}}",
+                "cancel"
+              ]
+            },
+            "description": "Sends a `cancelLoan` **signal** to the Temporal workflow.\n\n**What happens inside the workflow:**\n- `AbstractLoanWorkflow.cancelLoan()` sets `cancelled = true` and records the reason\n- When `finalizeLoan()` runs, it calls `loanActivities.cancelLoan(loanId, reason)` instead of the paid-off path\n- The `cancelLoan` activity sets status to `CANCELLED` and writes a `CANCELLED` event to `workflow_events`\n\n**Note:** If the workflow has already called `disburseLoan`, the loan is now `ACTIVE` and cancellation will be rejected with `409 Conflict`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Cancellation confirmed', () => pm.expect(pm.response.json().message).to.include('Cancellation'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Step 3 \u2013 Verify loan is CANCELLED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{cancelLoanId}}",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{cancelLoanId}}"
+              ]
+            },
+            "description": "The loan record should now show `status: CANCELLED` and the `notes` field should contain the cancellation reason."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 200', () => pm.response.to.have.status(200));",
+                  "pm.test('Status is CANCELLED', () => pm.expect(pm.response.json().status).to.eql('CANCELLED'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5. Error Cases",
+      "description": "Validates the API's error handling for common invalid operations.",
+      "item": [
+        {
+          "name": "404 \u2013 Loan not found",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/99999",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "99999"
+              ]
+            },
+            "description": "Requesting a non-existent loan should return `404 Not Found` with an error body."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 404', () => pm.response.to.have.status(404));",
+                  "pm.test('Error message present', () => pm.expect(pm.response.json()).to.have.property('error'));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 \u2013 Missing required fields",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"productId\": 1,\n  \"principalAmount\": 5000.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans"
+              ]
+            },
+            "description": "Omitting `borrowerId` (a required `@NotBlank` field) triggers Bean Validation and returns `400 Bad Request`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400', () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 \u2013 Amount below product minimum",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"borrowerId\": \"borrower-error-test\",\n  \"productId\": 1,\n  \"principalAmount\": 10.00\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans"
+              ]
+            },
+            "description": "The Installments product has a minimum of $500. Requesting $10 fails business validation in `LoanService.validateLoanCreation` with `400 Bad Request`."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 400 or 404', () => {",
+                  "    pm.expect([400, 404]).to.include(pm.response.code);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 \u2013 Payment on non-active loan",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"amount\": 100.00,\n  \"referenceNumber\": \"PAY-ERR-001\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/loans/{{cancelLoanId}}/payments",
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "api",
+                "loans",
+                "{{cancelLoanId}}",
+                "payments"
+              ]
+            },
+            "description": "Attempting to submit a payment for the cancelled loan (from the Cancel Flow scenario) should return `409 Conflict` because `LoanService.processPayment` rejects payments on loans not in `ACTIVE` or `DELINQUENT` status."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test('Status 409 Conflict', () => pm.response.to.have.status(409));",
+                  "pm.test('Error message present', () => pm.expect(pm.response.json()).to.have.property('error'));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

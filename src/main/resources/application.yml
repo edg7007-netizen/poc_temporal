@@ -1,0 +1,48 @@
+spring:
+  application:
+    name: poc-temporal-lending-engine
+
+  # Datasource is auto-configured by Spring Boot Docker Compose support at startup.
+  # When running locally, `compose.yaml` (at the project root) is started automatically
+  # and the connection URL, username, and password are injected from the running container.
+
+  jpa:
+    hibernate:
+      # 'create' drops and recreates the schema on every startup (schema changes are always applied
+      # cleanly, but any data from a previous run is lost on restart — acceptable for this PoC).
+      # Unlike 'create-drop' it does NOT drop tables on shutdown, so you can connect to PostgreSQL
+      # with psql or a GUI tool at any time and inspect the data while the app is running or after
+      # it stops.
+      # For a production environment, switch to 'validate' or 'none' and use a migration tool (e.g. Flyway).
+      ddl-auto: create
+    # Ensures data.sql runs AFTER Hibernate has created the schema
+    defer-datasource-initialization: true
+    show-sql: false
+    properties:
+      hibernate:
+        format_sql: true
+
+  sql:
+    init:
+      mode: always
+
+# Temporal configuration (using temporal-spring-boot-starter)
+spring.temporal:
+  connection:
+    target: 127.0.0.1:7233
+  workers:
+    - task-queue: lending-task-queue
+      workflow-classes:
+        - com.poc.temporal.lending.workflow.InstallmentsWorkflowImpl
+        - com.poc.temporal.lending.workflow.CDDWorkflowImpl
+      activity-beans:
+        - loanActivitiesImpl
+        - ledgerActivitiesImpl
+
+server:
+  port: 8080
+
+logging:
+  level:
+    com.poc.temporal: DEBUG
+    io.temporal: INFO
